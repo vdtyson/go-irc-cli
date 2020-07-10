@@ -1,10 +1,14 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"github.com/go-resty/resty/v2"
+	"log"
 	"net/http"
+	"os"
+	"time"
 )
 
 var httpClient *http.Client
@@ -61,6 +65,11 @@ type AllChannelMessagesInput struct {
 	UserName    string `json:"username"`
 	ChannelName string `json:"channelName"`
 }
+type Message struct {
+	SenderMessage  string    `json:"message"`
+	SenderUsername string    `json:"senderUsername"`
+	TimeSent       time.Time `json:"timeSent"`
+}
 
 /* PATHS without body */
 
@@ -79,20 +88,61 @@ const (
 	NEW_DM_ENDPOINT            = "/channels/direct/{username1}/{username2}"
 	NEW_CHANNEL_ENDPOINT       = "/channels/new"
 	NEW_MESSAGE_ENDPOINT       = "/channels/message"
+	NEWEST_MESSAGE_ENDPOINT    = "/channels/messages/newest"
 )
 
 func main() {
 	initClient()
-	input := NewMessageInput{"#midnight-coders", "Coding at midnight is very fun", "vdtyson"}
-	err := addMessageToChannel(input)
-	if err != nil {
-		fmt.Errorf(err.Error())
-	}
+	input := AllChannelMessagesInput{"vdtyson", "#v's_lounge"}
+	watchChannel(&input)
 }
 
 func initClient() {
 	client = resty.New()
 	client.HostURL = BASE_URL
+}
+
+// TODO
+func watchChannel(messagesInput *AllChannelMessagesInput) {
+	var lastMessage *Message
+	input := make(chan string, 1)
+	var end = false
+	go getInput(input)
+	for !end {
+		message, _ := getNewestChannelMessage(messagesInput)
+		if lastMessage == nil && message.SenderUsername != "" {
+			lastMessage = message
+			fmt.Printf("%s: %s\n", lastMessage.SenderUsername, lastMessage.SenderMessage)
+		}
+
+		if lastMessage != nil && message.SenderUsername != lastMessage.SenderUsername && message.SenderMessage != lastMessage.SenderMessage {
+			lastMessage = message
+			fmt.Printf("%s: %s\n", lastMessage.SenderUsername, lastMessage.SenderMessage)
+		}
+
+		select {
+		case i := <-input:
+			if i == "./home" {
+				end = true
+			} else {
+				fmt.Println(i)
+			}
+		case <-time.After(5 * time.Second):
+			fmt.Println("timed out")
+		}
+	}
+}
+
+func getInput(input chan string) {
+	for {
+		in := bufio.NewReader(os.Stdin)
+		result, err := in.ReadString('\n')
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		input <- result
+	}
 }
 
 func addMessageToChannel(input NewMessageInput) error {
@@ -150,7 +200,7 @@ func getUserChannels(username string) error {
 func getAllChannelMessages(input *AllChannelMessagesInput) error {
 	resp, err := client.R().
 		SetBody(input).
-		Put(ALL_CHAN_MESSAGES_ENDPOINT)
+		Post(ALL_CHAN_MESSAGES_ENDPOINT)
 
 	if err != nil {
 		return err
@@ -158,6 +208,25 @@ func getAllChannelMessages(input *AllChannelMessagesInput) error {
 
 	fmt.Print(resp.String())
 	return nil
+}
+
+func getNewestChannelMessage(input *AllChannelMessagesInput) (*Message, error) {
+	resp, err := client.R().SetBody(input).Post(NEWEST_MESSAGE_ENDPOINT)
+	if err != nil {
+		return nil, err
+	}
+
+	if resp.IsSuccess() {
+		var message Message
+		err := json.Unmarshal(resp.Body(), &message)
+		if err != nil {
+			return nil, err
+		} else {
+			return &message, nil
+		}
+	} else {
+		return nil, fmt.Errorf(resp.String())
+	}
 }
 
 func inviteUser(input *AddUserToChannelInput) error {
