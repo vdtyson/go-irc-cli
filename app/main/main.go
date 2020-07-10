@@ -4,11 +4,12 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
-	"github.com/go-resty/resty/v2"
 	"log"
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/go-resty/resty/v2"
 )
 
 var httpClient *http.Client
@@ -93,7 +94,7 @@ const (
 
 func main() {
 	initClient()
-	input := AllChannelMessagesInput{"vdtyson", "#v's_lounge"}
+	input := AllChannelMessagesInput{"vdtyson", "#main"}
 	watchChannel(&input)
 }
 
@@ -115,20 +116,26 @@ func watchChannel(messagesInput *AllChannelMessagesInput) {
 			fmt.Printf("%s: %s\n", lastMessage.SenderUsername, lastMessage.SenderMessage)
 		}
 
-		if lastMessage != nil && message.SenderUsername != lastMessage.SenderUsername && message.SenderMessage != lastMessage.SenderMessage {
+		if lastMessage != nil && (message.SenderUsername != lastMessage.SenderUsername || message.SenderMessage != lastMessage.SenderMessage) {
 			lastMessage = message
 			fmt.Printf("%s: %s\n", lastMessage.SenderUsername, lastMessage.SenderMessage)
 		}
 
 		select {
 		case i := <-input:
-			if i == "./home" {
+			if i == "home\n" {
 				end = true
-			} else {
-				fmt.Println(i)
+			} else if i == "send\n" {
+				fmt.Println("Enter new message:- ")
+				msg := <-input
+				mInput := NewMessageInput{ChannelName: messagesInput.ChannelName, Message: msg, SenderUsername: messagesInput.UserName}
+				err := addMessageToChannel(mInput)
+				if err != nil {
+					log.Fatal(err)
+				}
 			}
-		case <-time.After(5 * time.Second):
-			fmt.Println("timed out")
+		case <-time.After(3 * time.Second):
+			continue
 		}
 	}
 }
@@ -151,9 +158,7 @@ func addMessageToChannel(input NewMessageInput) error {
 		return err
 	}
 
-	if resp.IsSuccess() {
-		fmt.Println("Message added!")
-	} else {
+	if !resp.IsSuccess() {
 		fmt.Println(string(resp.Body()))
 	}
 	return nil
